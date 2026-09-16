@@ -129,7 +129,7 @@ export async function POST(req: Request) {
       } finally {
         controller.close();
         // Learning happens after the user already has their answer.
-        if (full) void learnFromExchange(user.id, message, full);
+        if (full) void learnFromExchange(user.id, message);
       }
     },
   });
