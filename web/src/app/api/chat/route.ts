@@ -5,10 +5,12 @@ import { db } from "@/db";
 import { conversations, messages as messagesTable } from "@/db/schema";
 import { getUser } from "@/lib/auth";
 import { checkPrompt, recordBlock, systemPromptFor } from "@/lib/safety";
-import { streamChat, resolveMode, type ChatMessage } from "@/lib/ai/chat";
+import { streamChat, resolveMode, smartModeAvailable, type ChatMessage } from "@/lib/ai/chat";
 import { retrieve, formatExcerpts } from "@/lib/rag";
 import { recallMemories, formatMemories, learnFromExchange } from "@/lib/memory";
 import { looksLikeImageRequest, extractImagePrompt } from "@/lib/image-intent";
+import { looksLikeDiagramRequest } from "@/lib/diagram";
+import { generateDiagram } from "@/lib/ai/diagrams";
 import { generateImage, imagesEnabled } from "@/lib/ai/images";
 import { KID_NEGATIVE_PROMPT } from "@/lib/safety";
 import { generatedImages } from "@/db/schema";
@@ -89,6 +91,45 @@ export async function POST(req: Request) {
       let full = "";
       try {
         controller.enqueue(event({ type: "meta", conversationId: convId, mode, model }));
+
+        // A diagram is structured drawing — positions, arrows, labels — which
+        // the language model does far better than a diffusion model. Checked
+        // first, because "draw a diagram of X" matches both.
+        if (looksLikeDiagramRequest(message)) {
+          controller.enqueue(event({ type: "status", text: "Drawing the diagram…" }));
+          try {
+            const url = await generateDiagram(message, mode);
+            await db.insert(generatedImages).values({
+              userId: user.id,
+              conversationId: convId,
+              prompt: message,
+              storagePath: url,
+            });
+
+            full = smartModeAvailable() && mode !== "smart"
+              ? "Here's the diagram. Tick smart mode for a more precise one."
+              : "Here's the diagram:";
+            await db.insert(messagesTable).values({
+              conversationId: convId,
+              role: "assistant",
+              content: full,
+              model: `${model} (svg)`,
+              attachments: [url],
+            });
+            await db.update(conversations)
+              .set({ updatedAt: new Date() })
+              .where(eq(conversations.id, convId));
+
+            controller.enqueue(event({ type: "delta", text: full }));
+            controller.enqueue(event({ type: "image", url }));
+            controller.enqueue(event({ type: "done" }));
+            return;
+          } catch (e) {
+            const why = e instanceof Error ? e.message : "Diagram generation failed.";
+            controller.enqueue(event({ type: "error", message: why }));
+            return;
+          }
+        }
 
         // People ask for pictures in plain language rather than reaching for a
         // button, so handle that here instead of letting the chat model
