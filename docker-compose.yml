@@ -1,5 +1,15 @@
 name: fedup-ai
 
+# Persistent data lives in named volumes, not bind mounts.
+#
+# Docker Desktop on WSL2 has a startup race: after a host reboot, containers
+# with a restart policy can come up before the WSL filesystem is available to
+# Docker. A bind mount then silently resolves to an empty directory inside
+# Docker's own VM, Postgres initdb's into it, and the real data on disk is
+# quietly orphaned. Named volumes are managed by Docker and are not affected.
+#
+# Use `python -m scripts.backup` to get the data back out.
+
 services:
   db:
     image: pgvector/pgvector:pg17
@@ -9,8 +19,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro   # read-only, safe as a bind
     ports:
       - "5434:5432"          # host:5434 — 5432/5433 already in use on this box
     healthcheck:
@@ -24,14 +34,12 @@ services:
       context: ./web
     restart: unless-stopped
     env_file: .env
-    # Match the host user so bind-mounted uploads/images stay writable.
-    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       NODE_ENV: production
     volumes:
-      - ./data/uploads:/app/uploads     # original files people upload
-      - ./data/images:/app/generated    # pictures the AI makes
+      - uploads:/app/uploads      # original files people upload
+      - images:/app/generated     # pictures the AI makes
     ports:
       - "3080:3000"
     extra_hosts:
@@ -47,8 +55,11 @@ services:
       context: ./comfy
     restart: unless-stopped
     volumes:
-      - ./comfy/models:/opt/ComfyUI/models
-      - ./data/comfy-output:/opt/ComfyUI/output
+      # Read-only: the checkpoint is large and we never want it re-downloaded
+      # into a phantom mount, but a stale empty mount here only breaks renders,
+      # it cannot lose data.
+      - ./comfy/models:/opt/ComfyUI/models:ro
+      - comfy_output:/opt/ComfyUI/output
     ports:
       - "8188:8188"
     deploy:
@@ -58,3 +69,9 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+volumes:
+  pgdata:
+  uploads:
+  images:
+  comfy_output:

@@ -70,6 +70,16 @@ docker compose --profile images up -d --build
 The first build of that container is large (PyTorch + CUDA) and the first render
 takes a minute while the model pages into VRAM.
 
+### Sharing one GPU
+
+An 8GB card cannot hold the chat model and the image model at the same time, so
+the app hands the GPU over explicitly: before a render it asks Ollama to drop its
+resident models, and afterwards it tells ComfyUI to release its checkpoint. The
+next chat message reloads the chat model, which costs a few seconds.
+
+Set `FREE_VRAM_FOR_IMAGES=false` in `.env` to disable this — only sensible on a
+card with enough memory for both (roughly 16GB or more).
+
 ---
 
 ## Everyday commands

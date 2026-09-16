@@ -110,3 +110,34 @@ export async function describeImage(base64: string, prompt: string): Promise<str
   const j = (await res.json()) as { message?: { content?: string } };
   return j.message?.content ?? "";
 }
+
+type LoadedModel = { name: string };
+
+/**
+ * Asks Ollama to drop its resident models so the image model can have the GPU.
+ * On an 8GB card the chat model and SDXL cannot both stay loaded; setting
+ * keep_alive to 0 evicts immediately. Best-effort — never blocks the caller.
+ */
+export async function unloadModels(): Promise<string[]> {
+  try {
+    const res = await fetch(`${BASE}/api/ps`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return [];
+    const { models = [] } = (await res.json()) as { models?: LoadedModel[] };
+
+    const freed: string[] = [];
+    for (const m of models) {
+      const ok = await fetch(`${BASE}/api/generate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: m.name, keep_alive: 0 }),
+        signal: AbortSignal.timeout(15_000),
+      })
+        .then((r) => r.ok)
+        .catch(() => false);
+      if (ok) freed.push(m.name);
+    }
+    return freed;
+  } catch {
+    return [];
+  }
+}

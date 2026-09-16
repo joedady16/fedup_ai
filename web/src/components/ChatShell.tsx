@@ -95,6 +95,7 @@ export default function ChatShell({
             message?: string;
             conversationId?: string;
             files?: string[];
+            url?: string;
           };
 
           if (ev.type === "meta" && ev.conversationId) {
@@ -106,13 +107,37 @@ export default function ChatShell({
               next[next.length - 1] = { ...next[next.length - 1], sources: ev.files };
               return next;
             });
-          } else if (ev.type === "delta") {
+          } else if (ev.type === "status") {
+            setMessages((m) => {
+              const next = [...m];
+              next[next.length - 1] = {
+                ...next[next.length - 1],
+                content: ev.text ?? "",
+                pending: true,
+              };
+              return next;
+            });
+          } else if (ev.type === "image" && ev.url) {
+            const url = ev.url;
             setMessages((m) => {
               const next = [...m];
               const last = next[next.length - 1];
               next[next.length - 1] = {
                 ...last,
-                content: last.content + (ev.text ?? ""),
+                attachments: [...(last.attachments ?? []), url],
+                pending: false,
+              };
+              return next;
+            });
+          } else if (ev.type === "delta") {
+            setMessages((m) => {
+              const next = [...m];
+              const last = next[next.length - 1];
+              // A "status" placeholder is replaced, real deltas accumulate.
+              const base = last.pending ? "" : last.content;
+              next[next.length - 1] = {
+                ...last,
+                content: base + (ev.text ?? ""),
                 pending: false,
               };
               return next;

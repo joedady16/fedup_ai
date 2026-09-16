@@ -8,6 +8,10 @@ import { checkPrompt, recordBlock, systemPromptFor } from "@/lib/safety";
 import { streamChat, resolveMode, type ChatMessage } from "@/lib/ai/chat";
 import { retrieve, formatExcerpts } from "@/lib/rag";
 import { recallMemories, formatMemories, learnFromExchange } from "@/lib/memory";
+import { looksLikeImageRequest, extractImagePrompt } from "@/lib/image-intent";
+import { generateImage, imagesEnabled } from "@/lib/ai/images";
+import { KID_NEGATIVE_PROMPT } from "@/lib/safety";
+import { generatedImages } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -85,6 +89,50 @@ export async function POST(req: Request) {
       let full = "";
       try {
         controller.enqueue(event({ type: "meta", conversationId: convId, mode, model }));
+
+        // People ask for pictures in plain language rather than reaching for a
+        // button, so handle that here instead of letting the chat model
+        // pretend it can draw.
+        if (imagesEnabled() && looksLikeImageRequest(message)) {
+          const subject = extractImagePrompt(message);
+          controller.enqueue(event({ type: "status", text: `Drawing ${subject}…` }));
+
+          const renderOpts =
+            user.role === "kid"
+              ? { negative: KID_NEGATIVE_PROMPT, guidance: 2.5, steps: 6 }
+              : {};
+
+          try {
+            const url = await generateImage(subject, renderOpts);
+            await db.insert(generatedImages).values({
+              userId: user.id,
+              conversationId: convId,
+              prompt: subject,
+              storagePath: url,
+            });
+
+            full = `Here's what I drew for "${subject}":`;
+            await db.insert(messagesTable).values({
+              conversationId: convId,
+              role: "assistant",
+              content: full,
+              model: "sdxl-turbo",
+              attachments: [url],
+            });
+            await db.update(conversations)
+              .set({ updatedAt: new Date() })
+              .where(eq(conversations.id, convId));
+
+            controller.enqueue(event({ type: "delta", text: full }));
+            controller.enqueue(event({ type: "image", url }));
+            controller.enqueue(event({ type: "done" }));
+            return;
+          } catch (e) {
+            const why = e instanceof Error ? e.message : "Image generation failed.";
+            controller.enqueue(event({ type: "error", message: why }));
+            return;
+          }
+        }
 
         // Pull in what we know: documents first, then learned facts.
         const [excerpts, memories] = await Promise.all([

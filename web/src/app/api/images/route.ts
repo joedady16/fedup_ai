@@ -34,11 +34,16 @@ export async function POST(req: Request) {
     );
   }
 
-  // Children always get the safety negative prompt applied.
-  const negative = user.role === "kid" ? KID_NEGATIVE_PROMPT : "blurry, low quality, watermark";
+  // Children render with guidance enabled so the safety negative prompt is
+  // actually applied; adults get turbo's fast cfg-1.0 path, where a negative
+  // prompt would be ignored anyway.
+  const opts =
+    user.role === "kid"
+      ? { negative: KID_NEGATIVE_PROMPT, guidance: 2.5, steps: 6 }
+      : {};
 
   try {
-    const url = await generateImage(prompt, negative);
+    const url = await generateImage(prompt, opts);
 
     // Only attach to a conversation the requester actually owns.
     let convId: string | null = null;

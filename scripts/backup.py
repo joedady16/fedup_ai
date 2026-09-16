@@ -8,7 +8,6 @@ import argparse
 import shutil
 import subprocess
 import sys
-import tarfile
 from datetime import datetime
 
 from .common import ROOT, console, env
@@ -44,16 +43,23 @@ def main() -> int:
         return 1
     console.print(f"  [green]✓[/green] {dump.name} ({dump.stat().st_size / 1e6:.1f} MB)")
 
+    # Uploads and generated images live in named Docker volumes, so pull them
+    # out through a throwaway container rather than reading the host disk.
     archive = out_dir / f"files-{stamp}.tar.gz"
-    data = ROOT / "data"
-    if data.exists():
-        console.print("[bold]Archiving uploads and images…[/bold]")
-        with tarfile.open(archive, "w:gz") as tar:
-            for sub in ("uploads", "images"):
-                p = data / sub
-                if p.exists():
-                    tar.add(p, arcname=sub)
+    console.print("[bold]Archiving uploads and images…[/bold]")
+    try:
+        with open(archive, "wb") as fh:
+            subprocess.run(
+                ["docker", "run", "--rm",
+                 "-v", "fedup-ai_uploads:/data/uploads:ro",
+                 "-v", "fedup-ai_images:/data/images:ro",
+                 "alpine", "tar", "czf", "-", "-C", "/data", "uploads", "images"],
+                stdout=fh, check=True,
+            )
         console.print(f"  [green]✓[/green] {archive.name} ({archive.stat().st_size / 1e6:.1f} MB)")
+    except subprocess.CalledProcessError as e:
+        console.print(f"  [yellow]could not archive files ({e.returncode})[/yellow]")
+        archive.unlink(missing_ok=True)
 
     console.print(f"\n[green]Backup complete →[/green] {out_dir}")
     return 0

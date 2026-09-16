@@ -64,20 +64,41 @@ def download_checkpoint() -> bool:
 
     console.print(f"[bold]Downloading[/bold] {dest.name} (~7GB, one time) …")
     tmp = dest.with_suffix(".part")
+
+    # Resume a partial download rather than starting the 7GB over again.
+    done = tmp.stat().st_size if tmp.exists() else 0
+    headers = {"Range": f"bytes={done}-"} if done else {}
+    if done:
+        console.print(f"  [dim]resuming from {done / 1e9:.2f}GB[/dim]")
+
     try:
-        with client(timeout=None) as c, c.stream("GET", CHECKPOINT_URL) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("content-length", 0))
+        with client(timeout=None) as c, c.stream("GET", CHECKPOINT_URL, headers=headers) as r:
+            if done and r.status_code == 200:
+                # Server ignored the range request; start clean.
+                console.print("  [dim]server does not support resume, restarting[/dim]")
+                done = 0
+            elif done and r.status_code != 206:
+                r.raise_for_status()
+            else:
+                r.raise_for_status()
+
+            remaining = int(r.headers.get("content-length", 0))
+            total = done + remaining if remaining else None
+
             with Progress(
                 TextColumn("  [progress.description]{task.description}"),
                 BarColumn(), DownloadColumn(), TimeRemainingColumn(),
                 console=console,
             ) as bar:
-                task = bar.add_task("checkpoint", total=total or None)
-                with open(tmp, "wb") as fh:
+                task = bar.add_task("checkpoint", total=total, completed=done)
+                with open(tmp, "ab" if done else "wb") as fh:
                     for block in r.iter_bytes(chunk_size=1 << 20):
                         fh.write(block)
                         bar.update(task, advance=len(block))
+
+        # A truncated file is worse than none — only promote a complete one.
+        if total and tmp.stat().st_size < total:
+            raise OSError(f"incomplete: {tmp.stat().st_size} of {total} bytes")
         tmp.rename(dest)
         console.print(f"  [green]✓[/green] saved to {dest.relative_to(ROOT)}")
         return True
