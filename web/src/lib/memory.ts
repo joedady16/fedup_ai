@@ -21,7 +21,12 @@ export async function recallMemories(userId: string, query: string, k = 5): Prom
   return rows.filter((r) => r.distance < 0.65).map((r) => r.content);
 }
 
-export async function addMemory(userId: string, content: string, kind = "fact") {
+export async function addMemory(
+  userId: string,
+  content: string,
+  kind = "fact",
+  sourceConversationId: string | null = null,
+) {
   const trimmed = content.trim();
   if (trimmed.length < 4) return;
 
@@ -36,8 +41,8 @@ export async function addMemory(userId: string, content: string, kind = "fact") 
   if (dupe) return;
 
   await pg`
-    INSERT INTO memories (user_id, content, kind, embedding)
-    VALUES (${userId}, ${trimmed}, ${kind}, ${vec}::vector)
+    INSERT INTO memories (user_id, content, kind, source_conversation_id, embedding)
+    VALUES (${userId}, ${trimmed}, ${kind}, ${sourceConversationId}, ${vec}::vector)
   `;
 }
 
@@ -48,8 +53,43 @@ const STOPWORDS = new Set([
   "person", "user", "people", "thing", "things", "about", "into", "than", "then",
 ]);
 
-/** Phrasings that describe a passing question rather than a durable trait. */
-const TRANSIENT = /\b(asked?|asking|inquir\w*|wondered|wants? to know|requested|questioned|queried|is curious|would like to know)\b/i;
+/** Phrasings that describe a passing question or state rather than a durable trait. */
+const TRANSIENT =
+  /\b(asked?|asking|inquir\w*|wondered|wants? to know|requested|questioned|queried|is curious|would like to know|looking for|is trying to|has not|hasn'?t|have not|haven'?t|did not|didn'?t|is seeking|seeks|needs? help|is interested in (?:a|an|the)\b|encountered|is experiencing|received an? error)\b/i;
+
+/**
+ * Text the user pasted rather than wrote — error messages, logs, stack traces,
+ * config dumps. People do not reveal durable facts about themselves inside a
+ * pasted error, but the extractor will happily mine a vendor's postal address
+ * out of one and file it as the user's own.
+ */
+function looksPasted(text: string): boolean {
+  if (text.length > 600) return true;
+
+  // Any one of these is conclusive on its own.
+  const strong = [
+    /\b(stack ?trace|traceback|most recent call last|errno|exception[: ]|\w+Error\b|\w+Exception\b)/i,
+    /\b(status code|http\/\d|\bat line \d+)/i,
+    /\b\w+\.(py|ts|js|cs|java|rb|go|sql|json|ya?ml):?\s*(line\s*)?\d+/i,
+  ];
+  if (strong.some((m) => m.test(text))) return true;
+
+  // These are only suggestive, so require two.
+  const weak = [
+    /https?:\/\//i,                     // URLs
+    /\b[\w.-]+\.(com|net|org|io|dev|windows\.net|azure\.com)\b/i, // hostnames
+    /\berror\b/i,
+    /\b[A-Z][A-Z0-9_-]{8,}\b/,          // SCREAMING identifiers / cluster names
+    /\b\d{1,5}\s+\w+\s+(street|st|road|rd|way|avenue|ave|drive|dr|blvd)\b/i,
+    /[{}\[\]<>]{2,}/,                    // JSON/XML fragments
+    /\b\d{1,3}(\.\d{1,3}){3}\b/,        // IP addresses
+  ];
+  return weak.filter((m) => m.test(text)).length >= 2;
+}
+
+/** A learned fact must not carry a URL, hostname or postal address. */
+const FACT_CONTAMINATION =
+  /(https?:\/\/|\b[\w.-]+\.(?:com|net|org|io|dev)\b|\b\d{1,5}\s+\w+\s+(?:street|st|road|rd|way|avenue|ave|drive|dr|blvd)\b|\b[A-Z]{2}\s+\d{5}\b)/i;
 
 /**
  * A small local model will happily invent a person. Nothing is stored unless it
@@ -106,7 +146,14 @@ Output only the lines, no numbering, no preamble.`;
  * Runs after a reply, on the local model only — this is background work and
  * should never cost API money or block the user.
  */
-export async function learnFromExchange(userId: string, userText: string) {
+export async function learnFromExchange(
+  userId: string,
+  userText: string,
+  conversationId: string | null = null,
+) {
+  // Nothing durable is learned from pasted output.
+  if (looksPasted(userText)) return;
+
   try {
     let out = "";
     // Only the person's own words are considered; the assistant's reply is
@@ -128,11 +175,13 @@ export async function learnFromExchange(userId: string, userText: string) {
       .filter((l) => !said.includes(l.toLowerCase()))
       // "He asked about X" is a transcript line, not something to remember.
       .filter((l) => !TRANSIENT.test(l))
+      // Never keep a "fact" carrying a URL, hostname or postal address.
+      .filter((l) => !FACT_CONTAMINATION.test(l))
       // …and anything the model invented outright never gets stored.
       .filter((l) => isGrounded(l, userText))
       .slice(0, 3);
 
-    for (const line of lines) await addMemory(userId, line);
+    for (const line of lines) await addMemory(userId, line, "fact", conversationId);
   } catch {
     // Learning is best-effort; a failure here must not break the chat.
   }

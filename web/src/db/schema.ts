@@ -20,6 +20,9 @@ export const conversations = pgTable("conversations", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull().default("New chat"),
+  pinned: boolean("pinned").notNull().default(false),
+  /** Null means active. Archiving hides a chat without destroying anything. */
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -69,6 +72,9 @@ export const memories = pgTable("memories", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
   kind: text("kind").$type<"preference" | "fact" | "project">().notNull().default("fact"),
+  /** Which chat taught us this, so deleting that chat can also forget it. */
+  sourceConversationId: uuid("source_conversation_id")
+    .references(() => conversations.id, { onDelete: "set null" }),
   embedding: vector("embedding", { dimensions: EMBED_DIMS }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [

@@ -88,6 +88,15 @@ export async function migrate() {
       created_at timestamptz NOT NULL DEFAULT now()
     );
 
+    -- Added after first release; safe to re-run.
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned boolean NOT NULL DEFAULT false;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at timestamptz;
+    ALTER TABLE memories ADD COLUMN IF NOT EXISTS source_conversation_id uuid
+      REFERENCES conversations(id) ON DELETE SET NULL;
+
+    CREATE INDEX IF NOT EXISTS conversations_sort_idx
+      ON conversations(user_id, pinned DESC, updated_at DESC);
+
     CREATE INDEX IF NOT EXISTS chunks_embedding_idx
       ON chunks USING hnsw (embedding vector_cosine_ops);
     CREATE INDEX IF NOT EXISTS memories_embedding_idx

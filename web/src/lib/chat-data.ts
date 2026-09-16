@@ -5,12 +5,25 @@ import { conversations, messages } from "@/db/schema";
 import type { ConvoSummary, UiMessage } from "@/components/ChatShell";
 
 export async function listConversations(userId: string): Promise<ConvoSummary[]> {
-  return db
-    .select({ id: conversations.id, title: conversations.title })
+  const rows = await db
+    .select({
+      id: conversations.id,
+      title: conversations.title,
+      pinned: conversations.pinned,
+      archivedAt: conversations.archivedAt,
+    })
     .from(conversations)
     .where(eq(conversations.userId, userId))
-    .orderBy(desc(conversations.updatedAt))
-    .limit(50);
+    // Pinned float to the top; everything else is most-recent-first.
+    .orderBy(desc(conversations.pinned), desc(conversations.updatedAt))
+    .limit(200);
+
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    pinned: r.pinned,
+    archived: r.archivedAt !== null,
+  }));
 }
 
 /** Returns null when the conversation isn't this user's. */

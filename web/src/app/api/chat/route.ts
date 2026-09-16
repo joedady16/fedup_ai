@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { conversations, messages as messagesTable } from "@/db/schema";
 import { getUser } from "@/lib/auth";
-import { checkPrompt, recordBlock, systemPromptFor } from "@/lib/safety";
+import { checkPrompt, recordBlock, systemPromptFor, NO_IMAGE_CLAIM } from "@/lib/safety";
 import { streamChat, resolveMode, smartModeAvailable, type ChatMessage } from "@/lib/ai/chat";
 import { retrieve, formatExcerpts } from "@/lib/rag";
 import { recallMemories, formatMemories, learnFromExchange } from "@/lib/memory";
@@ -185,6 +185,7 @@ export async function POST(req: Request) {
           systemPromptFor(user.role, user.name),
           formatMemories(memories),
           formatExcerpts(excerpts),
+          NO_IMAGE_CLAIM, // last: small models weight the prompt tail most
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -218,7 +219,7 @@ export async function POST(req: Request) {
       } finally {
         controller.close();
         // Learning happens after the user already has their answer.
-        if (full) void learnFromExchange(user.id, message);
+        if (full) void learnFromExchange(user.id, message, convId);
       }
     },
   });

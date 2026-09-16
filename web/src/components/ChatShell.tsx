@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { logoutAction } from "@/app/actions";
+import {
+  logoutAction, togglePinAction, toggleArchiveAction, deleteConversationAction,
+} from "@/app/actions";
 
 export type UiMessage = {
   role: "user" | "assistant";
@@ -13,7 +15,12 @@ export type UiMessage = {
   pending?: boolean;
 };
 
-export type ConvoSummary = { id: string; title: string };
+export type ConvoSummary = {
+  id: string;
+  title: string;
+  pinned: boolean;
+  archived: boolean;
+};
 
 type Props = {
   user: { name: string; role: "admin" | "adult" | "kid" };
@@ -36,6 +43,7 @@ export default function ChatShell({
   const [error, setError] = useState<string | null>(null);
   const [convId, setConvId] = useState(conversationId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -232,6 +240,11 @@ export default function ChatShell({
     }
   }
 
+  const active = conversations.filter((c) => !c.archived);
+  const pinned = active.filter((c) => c.pinned);
+  const unpinned = active.filter((c) => !c.pinned);
+  const archived = conversations.filter((c) => c.archived);
+
   const border = { borderColor: "var(--border)" };
 
   return (
@@ -254,22 +267,44 @@ export default function ChatShell({
         </div>
 
         <nav className="flex-1 overflow-y-auto p-2 space-y-1">
-          {conversations.length === 0 && (
+          {active.length === 0 && archived.length === 0 && (
             <p className="px-2 py-3 text-xs" style={{ color: "var(--muted)" }}>
               No conversations yet.
             </p>
           )}
-          {conversations.map((c) => (
-            <Link
-              key={c.id}
-              href={`/chat/${c.id}`}
-              onClick={() => setSidebarOpen(false)}
-              className="block truncate rounded-md px-2 py-2 text-sm hover:opacity-80"
-              style={{ background: c.id === convId ? "var(--bg)" : "transparent" }}
-            >
-              {c.title}
-            </Link>
+
+          {pinned.length > 0 && (
+            <p className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide"
+               style={{ color: "var(--muted)" }}>
+              Pinned
+            </p>
+          )}
+          {pinned.map((c) => (
+            <ConversationRow key={c.id} convo={c} current={c.id === convId}
+                             onNavigate={() => setSidebarOpen(false)} />
           ))}
+
+          {unpinned.map((c) => (
+            <ConversationRow key={c.id} convo={c} current={c.id === convId}
+                             onNavigate={() => setSidebarOpen(false)} />
+          ))}
+
+          {archived.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowArchived((v) => !v)}
+                className="mt-2 w-full px-2 py-1 text-left text-[10px] uppercase tracking-wide hover:opacity-80"
+                style={{ color: "var(--muted)" }}
+              >
+                {showArchived ? "▾" : "▸"} Archived ({archived.length})
+              </button>
+              {showArchived &&
+                archived.map((c) => (
+                  <ConversationRow key={c.id} convo={c} current={c.id === convId}
+                                   onNavigate={() => setSidebarOpen(false)} />
+                ))}
+            </>
+          )}
         </nav>
 
         <div className="border-t p-3 text-xs space-y-2" style={border}>
@@ -425,6 +460,86 @@ export default function ChatShell({
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+/** One sidebar entry, with pin / archive / delete controls. */
+function ConversationRow({
+  convo, current, onNavigate,
+}: {
+  convo: ConvoSummary;
+  current: boolean;
+  onNavigate: () => void;
+}) {
+  return (
+    <div
+      className="group flex items-center gap-1 rounded-md pr-1"
+      style={{ background: current ? "var(--bg)" : "transparent" }}
+    >
+      <Link
+        href={`/chat/${convo.id}`}
+        onClick={onNavigate}
+        className="min-w-0 flex-1 truncate px-2 py-2 text-sm hover:opacity-80"
+        title={convo.title}
+      >
+        {convo.pinned && <span aria-hidden> 📌 </span>}
+        {convo.title}
+      </Link>
+
+      {/* Controls stay visible on touch devices, where hover does not exist. */}
+      <div className="flex shrink-0 items-center opacity-60 group-hover:opacity-100">
+        {!convo.archived && (
+          <form action={togglePinAction}>
+            <input type="hidden" name="id" value={convo.id} />
+            <button type="submit" title={convo.pinned ? "Unpin" : "Pin"}
+                    aria-label={convo.pinned ? "Unpin chat" : "Pin chat"}
+                    className="px-1 text-xs hover:opacity-70">
+              {convo.pinned ? "📌" : "📍"}
+            </button>
+          </form>
+        )}
+
+        <form action={toggleArchiveAction}>
+          <input type="hidden" name="id" value={convo.id} />
+          <button type="submit" title={convo.archived ? "Unarchive" : "Archive"}
+                  aria-label={convo.archived ? "Unarchive chat" : "Archive chat"}
+                  className="px-1 text-xs hover:opacity-70">
+            {convo.archived ? "↩️" : "🗄️"}
+          </button>
+        </form>
+
+        <form
+          action={deleteConversationAction}
+          onSubmit={(e) => {
+            const forget = e.currentTarget.elements.namedItem("forget") as HTMLInputElement;
+            const msg =
+              `Delete "${convo.title}" permanently?\n\n` +
+              `This cannot be undone. Archiving hides it instead and keeps everything.\n\n` +
+              `OK = delete the chat.\n` +
+              `Cancel = keep it.`;
+            if (!window.confirm(msg)) {
+              e.preventDefault();
+              return;
+            }
+            forget.value = window.confirm(
+              "Also forget what the assistant learned from this chat?\n\n" +
+                "OK = forget it too.\n" +
+                "Cancel = keep those memories.",
+            )
+              ? "true"
+              : "false";
+          }}
+        >
+          <input type="hidden" name="id" value={convo.id} />
+          <input type="hidden" name="forget" value="false" />
+          <button type="submit" title="Delete" aria-label="Delete chat"
+                  className="px-1 text-xs hover:opacity-70">
+            🗑️
+          </button>
+        </form>
       </div>
     </div>
   );

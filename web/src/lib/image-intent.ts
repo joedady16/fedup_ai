@@ -7,21 +7,25 @@ import "server-only";
  * the chat route checks here first. Kept deliberately conservative: a false
  * positive spends GPU time and returns a picture nobody wanted.
  */
-const VERB = String.raw`(?:draw|sketch|paint|generate|create|make|render|design|show\s+me|give\s+me|i\s+want|can\s+you\s+(?:draw|make|create|generate|show))`;
-const NOUN = String.raw`(?:picture|image|photo|drawing|sketch|painting|illustration|diagram|artwork|art|logo|poster|wallpaper|portrait|render)`;
+const VERB = String.raw`(?:draw|sketch|paint|generate|create|make|render|design|produce|whip\s+up|cook\s+up|knock\s+up|put\s+together|shoot|send|show|give|get|find|grab|hook\s+me\s+up\s+with|i\s+want|i\s+need|i'?d\s+like|let'?s\s+see|gimme|can\s+you|could\s+you|please)`;
+const NOUN = String.raw`(?:picture|pic|image|photo|photograph|drawing|sketch|painting|illustration|diagram|artwork|art|logo|poster|wallpaper|portrait|render|visual)`;
 
 const PATTERNS: RegExp[] = [
-  // "draw a picture of a fox", "can you make an image of…"
+  // The strongest and most verb-agnostic signal: "... a picture OF <thing>".
+  // This is what catches phrasings no verb list would ever cover —
+  // "shoot me a picture of", "hook me up with an image of", and so on.
+  new RegExp(String.raw`\b(?:a|an|some)\s+${NOUN}\s+(?:of|showing|depicting|with)\b`, "i"),
+  // "picture of a fox" with no article at all.
+  new RegExp(String.raw`^\s*${NOUN}\s+of\b`, "i"),
+  // Verb followed by the noun: "generate a logo", "make me a poster".
   new RegExp(String.raw`^\s*${VERB}\b[^.?!]{0,40}?\b(?:a|an|some|me)?\s*${NOUN}\b`, "i"),
-  // "a picture of a fox, please"
-  new RegExp(String.raw`^\s*(?:a|an)\s+${NOUN}\s+of\b`, "i"),
-  // bare imperative: "draw a red fox"
+  // Bare imperative: "draw a red fox".
   new RegExp(String.raw`^\s*(?:draw|sketch|paint|illustrate)\s+(?:me\s+)?(?:a|an|the)\b`, "i"),
 ];
 
 /** Phrases that mention a picture but are not a request to make one. */
 const NOT_A_REQUEST =
-  /\b(?:in the (?:picture|image|photo)|this (?:picture|image|photo)|the attached|uploaded|describe the|what(?:'s| is) in)\b/i;
+  /\b(?:in the (?:picture|image|photo)|this (?:picture|image|photo)|the attached|uploaded|describe the|what(?:'s| is) in|didn'?t|did not|never (?:generated|made|drew)|couldn'?t|can'?t you|why (?:is|did|didn)|not seeing|no picture)\b/i;
 
 export function looksLikeImageRequest(text: string): boolean {
   const t = text.trim();
@@ -37,8 +41,9 @@ export function looksLikeImageRequest(text: string): boolean {
 export function extractImagePrompt(text: string): string {
   let t = text.trim().replace(/[?!]+$/, "");
 
+  // Strip any leading request wrapper, however it was phrased.
   t = t.replace(
-    new RegExp(String.raw`^\s*(?:hey\s+|please\s+)?(?:can\s+you\s+|could\s+you\s+|i\s+want\s+|i'?d\s+like\s+)?${VERB}\b`, "i"),
+    new RegExp(String.raw`^\s*(?:hey\s+|ok(?:ay)?\s+|so\s+|please\s+)*(?:${VERB}\s*){1,3}`, "i"),
     "",
   );
   t = t.replace(/^\s*me\b\s*/i, "");
