@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --muted: #71717a;
+  --accent: #4f46e5;
+  --bubble-user: #4f46e5;
+  --bubble-ai: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181b;
+    --panel: #212124;
+    --border: #35353a;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --accent: #818cf8;
+    --bubble-user: #4f46e5;
+    --bubble-ai: #2a2a2e;
+  }
+}
+
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Preserve newlines in model output without a markdown renderer. */
+.prose-plain { white-space: pre-wrap; word-break: break-word; line-height: 1.65; }

@@ -1,0 +1,13 @@
+.env
+node_modules/
+.next/
+out/
+data/
+comfy/models/
+*.log
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+backups/

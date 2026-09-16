@@ -1,0 +1,9 @@
+# Ops tooling for Fedup AI (setup, model downloads, health checks, backups).
+# The web app itself is TypeScript and needs no Python at runtime.
+#
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+
+httpx==0.28.1          # talks to Ollama / ComfyUI / the app
+rich==14.1.0           # readable CLI output and progress bars
+python-dotenv==1.1.1   # reads the project .env
