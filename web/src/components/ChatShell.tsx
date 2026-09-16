@@ -12,6 +12,7 @@ export type UiMessage = {
   content: string;
   attachments?: string[];
   sources?: string[];
+  links?: { url: string; title?: string }[];
   pending?: boolean;
 };
 
@@ -104,6 +105,7 @@ export default function ChatShell({
             conversationId?: string;
             files?: string[];
             url?: string;
+            links?: { url: string; title?: string }[];
           };
 
           if (ev.type === "meta" && ev.conversationId) {
@@ -113,6 +115,13 @@ export default function ChatShell({
             setMessages((m) => {
               const next = [...m];
               next[next.length - 1] = { ...next[next.length - 1], sources: ev.files };
+              return next;
+            });
+          } else if (ev.type === "links" && ev.links) {
+            const links = ev.links;
+            setMessages((m) => {
+              const next = [...m];
+              next[next.length - 1] = { ...next[next.length - 1], links };
               return next;
             });
           } else if (ev.type === "status") {
@@ -250,9 +259,18 @@ export default function ChatShell({
   return (
     <div className="flex h-dvh">
       {/* Sidebar */}
+      {/* Dim the chat behind the drawer on small screens. */}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-10 bg-black/40 md:hidden"
+          aria-hidden
+        />
+      )}
+
       <aside
-        className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-64 shrink-0 flex-col border-r
-                    absolute md:static inset-y-0 left-0 z-20`}
+        className={`${sidebarOpen ? "flex" : "hidden"} md:flex w-[17rem] shrink-0 flex-col border-r
+                    fixed md:static inset-y-0 left-0 z-20 shadow-xl md:shadow-none`}
         style={{ background: "var(--panel)", ...border }}
       >
         <div className="flex items-center justify-between p-3 border-b" style={border}>
@@ -307,17 +325,22 @@ export default function ChatShell({
           )}
         </nav>
 
-        <div className="border-t p-3 text-xs space-y-2" style={border}>
-          <div style={{ color: "var(--muted)" }}>
+        <div className="border-t p-3 text-sm" style={border}>
+          <div className="px-1 pb-2 text-xs" style={{ color: "var(--muted)" }}>
             {user.name} · {user.role}
           </div>
+          <Link href="/memories" className="block rounded-md px-1 py-1.5 hover:underline">
+            What it remembers
+          </Link>
           {user.role === "admin" && (
-            <Link href="/admin" className="block hover:underline">
+            <Link href="/admin" className="block rounded-md px-1 py-1.5 hover:underline">
               Family settings
             </Link>
           )}
           <form action={logoutAction}>
-            <button type="submit" className="hover:underline">Sign out</button>
+            <button type="submit" className="w-full px-1 py-1.5 text-left hover:underline">
+              Sign out
+            </button>
           </form>
         </div>
       </aside>
@@ -325,22 +348,30 @@ export default function ChatShell({
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header
-          className="flex items-center gap-3 border-b px-4 py-2 md:hidden"
+          className="sticky top-0 z-10 flex items-center gap-2 border-b px-2 py-2 md:hidden"
           style={{ background: "var(--panel)", ...border }}
         >
-          <button onClick={() => setSidebarOpen((v) => !v)} aria-label="Toggle menu">
+          <button
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label="Toggle menu"
+            className="h-10 w-10 rounded-lg text-lg"
+          >
             ☰
           </button>
           <span className="font-semibold">Fedup AI</span>
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl space-y-4 p-4">
+          <div className="mx-auto w-full max-w-[52rem] space-y-5 px-4 py-6 sm:px-6">
             {messages.length === 0 && (
-              <div className="pt-20 text-center" style={{ color: "var(--muted)" }}>
-                <p className="text-lg">Hi {user.name} — what can I help with?</p>
-                <p className="mt-2 text-sm">
-                  Ask a question, upload a document, or describe a picture to draw.
+              <div className="pt-24 text-center" style={{ color: "var(--muted)" }}>
+                <p className="text-2xl font-medium" style={{ color: "var(--text)" }}>
+                  Hi {user.name}
+                </p>
+                <p className="mt-2 text-[15px]">What can I help with?</p>
+                <p className="mx-auto mt-6 max-w-sm text-sm leading-relaxed">
+                  Ask a question, upload a document, ask for a picture, or say
+                  &ldquo;draw a diagram of&hellip;&rdquo;
                 </p>
               </div>
             )}
@@ -351,7 +382,9 @@ export default function ChatShell({
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm"
+                  className={`rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm ${
+                    m.role === "user" ? "max-w-[85%] sm:max-w-[75%]" : "max-w-full sm:max-w-[90%]"
+                  }`}
                   style={{
                     background: m.role === "user" ? "var(--bubble-user)" : "var(--bubble-ai)",
                     color: m.role === "user" ? "#fff" : "var(--text)",
@@ -375,6 +408,24 @@ export default function ChatShell({
                       Sources: {m.sources.join(", ")}
                     </p>
                   ) : null}
+
+                  {m.links?.length ? (
+                    <div className="mt-2 space-y-0.5 text-xs opacity-80">
+                      <p className="font-medium">From the web:</p>
+                      {m.links.map((l) => (
+                        <a
+                          key={l.url}
+                          href={l.url}
+                          target="_blank"
+                          rel="noopener noreferrer nofollow"
+                          className="block truncate underline hover:opacity-70"
+                          title={l.url}
+                        >
+                          {l.title || l.url}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -384,7 +435,7 @@ export default function ChatShell({
 
         {/* Composer */}
         <div className="border-t p-3" style={{ background: "var(--panel)", ...border }}>
-          <div className="mx-auto max-w-3xl space-y-2">
+          <div className="mx-auto w-full max-w-[52rem] space-y-2">
             {error && (
               <p className="text-sm" role="alert" style={{ color: "#dc2626" }}>
                 {error}
@@ -406,7 +457,7 @@ export default function ChatShell({
                 onClick={() => fileRef.current?.click()}
                 disabled={busy}
                 title="Upload a document"
-                className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50"
+                className="h-11 w-11 shrink-0 rounded-xl border text-base disabled:opacity-50"
                 style={border}
               >
                 📎
@@ -423,8 +474,9 @@ export default function ChatShell({
                 }}
                 rows={1}
                 placeholder="Ask anything…"
-                className="flex-1 resize-none rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
-                style={{ background: "var(--bg)", ...border, maxHeight: "9rem" }}
+                className="flex-1 resize-none rounded-xl border px-4 py-3 text-[15px] outline-none
+                           focus:ring-2 focus:ring-offset-0"
+                style={{ background: "var(--bg)", ...border, maxHeight: "10rem" }}
               />
 
               {imagesAvailable && (
@@ -432,7 +484,7 @@ export default function ChatShell({
                   onClick={() => void makePicture()}
                   disabled={busy || !input.trim()}
                   title="Draw this"
-                  className="rounded-lg border px-3 py-2 text-sm disabled:opacity-50"
+                  className="h-11 w-11 shrink-0 rounded-xl border text-base disabled:opacity-50"
                   style={border}
                 >
                   🎨
@@ -441,7 +493,7 @@ export default function ChatShell({
               <button
                 onClick={() => void send()}
                 disabled={busy || !input.trim()}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="h-11 shrink-0 rounded-xl px-5 text-sm font-medium text-white disabled:opacity-50"
                 style={{ background: "var(--accent)" }}
               >
                 Send
@@ -482,7 +534,7 @@ function ConversationRow({
       <Link
         href={`/chat/${convo.id}`}
         onClick={onNavigate}
-        className="min-w-0 flex-1 truncate px-2 py-2 text-sm hover:opacity-80"
+        className="min-w-0 flex-1 truncate px-2 py-2.5 text-sm hover:opacity-80"
         title={convo.title}
       >
         {convo.pinned && <span aria-hidden> 📌 </span>}
@@ -496,7 +548,7 @@ function ConversationRow({
             <input type="hidden" name="id" value={convo.id} />
             <button type="submit" title={convo.pinned ? "Unpin" : "Pin"}
                     aria-label={convo.pinned ? "Unpin chat" : "Pin chat"}
-                    className="px-1 text-xs hover:opacity-70">
+                    className="h-8 w-7 text-xs leading-8 hover:opacity-70">
               {convo.pinned ? "📌" : "📍"}
             </button>
           </form>
@@ -506,7 +558,7 @@ function ConversationRow({
           <input type="hidden" name="id" value={convo.id} />
           <button type="submit" title={convo.archived ? "Unarchive" : "Archive"}
                   aria-label={convo.archived ? "Unarchive chat" : "Archive chat"}
-                  className="px-1 text-xs hover:opacity-70">
+                  className="h-8 w-7 text-xs leading-8 hover:opacity-70">
             {convo.archived ? "↩️" : "🗄️"}
           </button>
         </form>
@@ -536,7 +588,7 @@ function ConversationRow({
           <input type="hidden" name="id" value={convo.id} />
           <input type="hidden" name="forget" value="false" />
           <button type="submit" title="Delete" aria-label="Delete chat"
-                  className="px-1 text-xs hover:opacity-70">
+                  className="h-8 w-7 text-xs leading-8 hover:opacity-70">
             🗑️
           </button>
         </form>

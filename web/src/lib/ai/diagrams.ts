@@ -14,12 +14,13 @@ import { IMAGES_DIR } from "./images";
  */
 async function attempt(subject: string, mode: Mode, note: string): Promise<string | null> {
   let raw = "";
-  for await (const piece of streamChat(
+  for await (const ev of streamChat(
     mode,
     [{ role: "user", content: `Draw this as a diagram: ${subject}${note}` }],
     DIAGRAM_SYSTEM_PROMPT,
   )) {
-    raw += piece;
+    if (ev.type !== "text") continue;   // a diagram never needs web results
+    raw += ev.text;
     if (raw.length > 500_000) break; // runaway guard
   }
 

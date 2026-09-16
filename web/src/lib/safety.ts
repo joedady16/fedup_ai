@@ -66,6 +66,32 @@ export function systemPromptFor(role: Role, name: string): string {
  * heavily — and gemma3 in particular will otherwise announce that it is
  * "drawing that for you now" and then claim it finished.
  */
+/**
+ * Swapped in when the request actually has live web tools, so the model does
+ * not refuse a lookup it is perfectly capable of doing.
+ */
+export const HAS_WEB_ACCESS =
+  `You have live web search and web page fetching available. Use them whenever ` +
+  `the answer depends on current information, a specific website, or anything ` +
+  `you are unsure about. Cite the pages you used.`;
+
+export const NO_WEB_ACCESS =
+  `You have no access to the internet in this reply. If the question needs a ` +
+  `live lookup or a specific web page, say so plainly and suggest turning on ` +
+  `smart mode, which can search the web. Never invent page contents or pretend ` +
+  `to have visited a site.`;
+
+/**
+ * Children are blocked from the web by their role, not by the mode switch, so
+ * telling them to "turn on smart mode" would be advice that cannot work.
+ */
+export const NO_WEB_ACCESS_KID =
+  `You have no access to the internet, and you cannot browse the web for this ` +
+  `person. If they ask for something that needs a live lookup, say kindly that ` +
+  `you cannot look things up on the internet and suggest they ask a parent. ` +
+  `Do not mention smart mode or any setting. Never invent page contents or ` +
+  `pretend to have visited a site.`;
+
 export const NO_IMAGE_CLAIM =
   `CRITICAL — you have no ability to draw, render, fetch or display images. ` +
   `You have no library of diagrams or photographs.\n` +

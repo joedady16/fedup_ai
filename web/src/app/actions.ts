@@ -7,7 +7,9 @@ import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { db } from "@/db";
-import { conversations, generatedImages, memories, users, type Role } from "@/db/schema";
+import {
+  conversations, generatedImages, memories, users, type Role,
+} from "@/db/schema";
 import {
   createSession, destroySession, hashPassword, requireAdmin, requireUser, verifyPassword,
 } from "@/lib/auth";
@@ -178,4 +180,48 @@ export async function renameConversationAction(formData: FormData) {
   await ownedConversation(id);
   await db.update(conversations).set({ title }).where(eq(conversations.id, id));
   revalidatePath("/chat");
+}
+
+// ---------------------------------------------------------------------------
+// Memories
+// ---------------------------------------------------------------------------
+
+/** Admins may inspect anyone's memories; everyone else only their own. */
+async function memoryOwner(targetUserId: string | null): Promise<string> {
+  const me = await requireUser();
+  if (!targetUserId || targetUserId === me.id) return me.id;
+  if (me.role !== "admin") throw new Error("FORBIDDEN");
+  return targetUserId;
+}
+
+export async function deleteMemoryAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const ownerId = await memoryOwner(String(formData.get("userId") ?? "") || null);
+
+  await db
+    .delete(memories)
+    .where(and(eq(memories.id, id), eq(memories.userId, ownerId)));
+  revalidatePath("/memories");
+}
+
+export async function clearMemoriesAction(formData: FormData) {
+  const ownerId = await memoryOwner(String(formData.get("userId") ?? "") || null);
+  await db.delete(memories).where(eq(memories.userId, ownerId));
+  revalidatePath("/memories");
+}
+
+export async function addMemoryAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const content = String(formData.get("content") ?? "").trim();
+  if (content.length < 4) return { error: "Write a little more than that." };
+  if (content.length > 300) return { error: "Keep it under 300 characters." };
+
+  const ownerId = await memoryOwner(String(formData.get("userId") ?? "") || null);
+
+  // Goes through the normal path so it is embedded and de-duplicated like any
+  // other memory.
+  const { addMemory } = await import("@/lib/memory");
+  await addMemory(ownerId, content, "fact", null);
+
+  revalidatePath("/memories");
+  return { ok: "Saved." };
 }

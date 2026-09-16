@@ -1,36 +1,71 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f7f7f8;
+  --bg: #f6f7f9;
   --panel: #ffffff;
-  --border: #e4e4e7;
-  --text: #18181b;
-  --muted: #71717a;
+  --border: #e5e7eb;
+  --text: #17181c;
+  --muted: #6b7280;
   --accent: #4f46e5;
   --bubble-user: #4f46e5;
   --bubble-ai: #ffffff;
+  --ring: rgba(79, 70, 229, 0.35);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #18181b;
-    --panel: #212124;
-    --border: #35353a;
-    --text: #f4f4f5;
-    --muted: #a1a1aa;
-    --accent: #818cf8;
+    --bg: #131417;
+    --panel: #1c1d21;
+    --border: #2e3036;
+    --text: #f2f3f5;
+    --muted: #9ca3af;
+    --accent: #6366f1;
     --bubble-user: #4f46e5;
-    --bubble-ai: #2a2a2e;
+    --bubble-ai: #24262b;
+    --ring: rgba(129, 140, 248, 0.4);
   }
 }
 
 html, body { height: 100%; }
+
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Preserve newlines in model output without a markdown renderer. */
-.prose-plain { white-space: pre-wrap; word-break: break-word; line-height: 1.65; }
+/* Model output keeps its line breaks without a markdown renderer. */
+.prose-plain {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+/* One consistent focus ring instead of the browser default. */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+  border-radius: 0.5rem;
+}
+
+textarea:focus, input:focus, select:focus {
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* Quieter scrollbars — the sidebar and transcript both scroll a lot. */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Stop iOS zooming the page when a text field is focused. */
+@media (max-width: 640px) {
+  input, textarea, select { font-size: 16px; }
+}

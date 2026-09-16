@@ -4,8 +4,13 @@ import { z } from "zod";
 import { db } from "@/db";
 import { conversations, messages as messagesTable } from "@/db/schema";
 import { getUser } from "@/lib/auth";
-import { checkPrompt, recordBlock, systemPromptFor, NO_IMAGE_CLAIM } from "@/lib/safety";
-import { streamChat, resolveMode, smartModeAvailable, type ChatMessage } from "@/lib/ai/chat";
+import {
+  checkPrompt, recordBlock, systemPromptFor, NO_IMAGE_CLAIM,
+  HAS_WEB_ACCESS, NO_WEB_ACCESS, NO_WEB_ACCESS_KID,
+} from "@/lib/safety";
+import {
+  streamChat, resolveMode, smartModeAvailable, webAccessAvailable, type ChatMessage,
+} from "@/lib/ai/chat";
 import { retrieve, formatExcerpts } from "@/lib/rag";
 import { recallMemories, formatMemories, learnFromExchange } from "@/lib/memory";
 import { looksLikeImageRequest, extractImagePrompt } from "@/lib/image-intent";
@@ -181,10 +186,17 @@ export async function POST(req: Request) {
           recallMemories(user.id, message).catch(() => []),
         ]);
 
+        const webEnabled = mode === "smart" && user.role !== "kid" && webAccessAvailable();
+
         const system = [
           systemPromptFor(user.role, user.name),
           formatMemories(memories),
           formatExcerpts(excerpts),
+          webEnabled
+            ? HAS_WEB_ACCESS
+            : user.role === "kid"
+              ? NO_WEB_ACCESS_KID
+              : NO_WEB_ACCESS,
           NO_IMAGE_CLAIM, // last: small models weight the prompt tail most
         ]
           .filter(Boolean)
@@ -196,9 +208,18 @@ export async function POST(req: Request) {
           );
         }
 
-        for await (const delta of streamChat(mode, convo, system)) {
-          full += delta;
-          controller.enqueue(event({ type: "delta", text: delta }));
+        // Children do not get live web access.
+        for await (const ev of streamChat(mode, convo, system, { web: webEnabled })) {
+          if (ev.type === "text") {
+            full += ev.text;
+            controller.enqueue(event({ type: "delta", text: ev.text }));
+          } else if (ev.type === "status") {
+            controller.enqueue(event({ type: "status", text: ev.text }));
+          } else if (ev.type === "sources") {
+            controller.enqueue(
+              event({ type: "links", links: ev.urls.slice(0, 8) }),
+            );
+          }
         }
 
         await db.insert(messagesTable).values({

@@ -55,7 +55,7 @@ const STOPWORDS = new Set([
 
 /** Phrasings that describe a passing question or state rather than a durable trait. */
 const TRANSIENT =
-  /\b(asked?|asking|inquir\w*|wondered|wants? to know|requested|questioned|queried|is curious|would like to know|looking for|is trying to|has not|hasn'?t|have not|haven'?t|did not|didn'?t|is seeking|seeks|needs? help|is interested in (?:a|an|the)\b|encountered|is experiencing|received an? error)\b/i;
+  /\b(asked?|asking|inquir\w*|wondered|wants? to know|requested|questioned|queried|(?:is|are) curious|would like to know|(?:is|are) looking for|looking for|(?:is|are) trying to|has not|hasn'?t|have not|haven'?t|did not|didn'?t|(?:is|are) seeking|seeks?|needs? help|(?:is|are|was|were) interested in|encountered|(?:is|are) experiencing|received an? error|frequently (?:consult|check|use|visit))\b/i;
 
 /**
  * Text the user pasted rather than wrote — error messages, logs, stack traces,
@@ -162,7 +162,7 @@ export async function learnFromExchange(
       { role: "system", content: EXTRACT_PROMPT },
       { role: "user", content: `The person said:\n${userText}` },
     ]);
-    for await (const piece of stream) out += piece;
+    for await (const piece of stream) out += piece;  // local model yields strings
 
     if (/^\s*NONE\s*$/i.test(out)) return;
 
