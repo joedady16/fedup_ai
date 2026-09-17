@@ -69,3 +69,15 @@ textarea:focus, input:focus, select:focus {
 @media (max-width: 640px) {
   input, textarea, select { font-size: 16px; }
 }
+
+/* Sidebar row controls ------------------------------------------------------
+   Mouse/trackpad: hidden until the row is hovered or focused, so the title
+   uses the full width. Touch: a single ⋯ menu, always reachable. */
+.row-actions-hover { display: none; }
+.row-actions-touch { display: block; }
+
+@media (hover: hover) and (pointer: fine) {
+  .row-actions-touch { display: none; }
+  .conv-row:hover .row-actions-hover,
+  .conv-row:focus-within .row-actions-hover { display: flex; }
+}

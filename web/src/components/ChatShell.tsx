@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   logoutAction, togglePinAction, toggleArchiveAction, deleteConversationAction,
+  renameConversationAction,
 } from "@/app/actions";
 
 export type UiMessage = {
@@ -518,7 +519,7 @@ export default function ChatShell({
 }
 
 
-/** One sidebar entry, with pin / archive / delete controls. */
+/** One sidebar entry, with rename / pin / archive / delete controls. */
 function ConversationRow({
   convo, current, onNavigate,
 }: {
@@ -526,73 +527,239 @@ function ConversationRow({
   current: boolean;
   onNavigate: () => void;
 }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [title, setTitle] = useState(convo.title);
+  const [draft, setDraft] = useState(convo.title);
+  const [, startTransition] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Enter saves and then the input blurs; this stops the blur saving twice.
+  const settled = useRef(false);
+
+  // Pick up renames made elsewhere (another tab, a refresh).
+  useEffect(() => {
+    if (!editing) setTitle(convo.title);
+  }, [convo.title, editing]);
+
+  useEffect(() => {
+    if (editing) {
+      settled.current = false;
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  function startEditing() {
+    setDraft(title);
+    setEditing(true);
+  }
+
+  function cancel() {
+    settled.current = true;
+    setEditing(false);
+  }
+
+  function save() {
+    if (settled.current) return;
+    settled.current = true;
+
+    const next = draft.trim().slice(0, 120);
+    setEditing(false);
+    if (!next || next === title) return;
+
+    const previous = title;
+    setTitle(next); // show it immediately rather than waiting on the server
+
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("id", convo.id);
+      fd.set("title", next);
+      try {
+        await renameConversationAction(fd);
+        router.refresh();
+      } catch {
+        setTitle(previous); // put it back if the save failed
+      }
+    });
+  }
+
   return (
     <div
-      className="group flex items-center gap-1 rounded-md pr-1"
+      className="conv-row group relative flex items-center gap-1 rounded-md"
       style={{ background: current ? "var(--bg)" : "transparent" }}
     >
-      <Link
-        href={`/chat/${convo.id}`}
-        onClick={onNavigate}
-        className="min-w-0 flex-1 truncate px-2 py-2.5 text-sm hover:opacity-80"
-        title={convo.title}
-      >
-        {convo.pinned && <span aria-hidden> 📌 </span>}
-        {convo.title}
-      </Link>
-
-      {/* Controls stay visible on touch devices, where hover does not exist. */}
-      <div className="flex shrink-0 items-center opacity-60 group-hover:opacity-100">
-        {!convo.archived && (
-          <form action={togglePinAction}>
-            <input type="hidden" name="id" value={convo.id} />
-            <button type="submit" title={convo.pinned ? "Unpin" : "Pin"}
-                    aria-label={convo.pinned ? "Unpin chat" : "Pin chat"}
-                    className="h-8 w-7 text-xs leading-8 hover:opacity-70">
-              {convo.pinned ? "📌" : "📍"}
-            </button>
-          </form>
-        )}
-
-        <form action={toggleArchiveAction}>
-          <input type="hidden" name="id" value={convo.id} />
-          <button type="submit" title={convo.archived ? "Unarchive" : "Archive"}
-                  aria-label={convo.archived ? "Unarchive chat" : "Archive chat"}
-                  className="h-8 w-7 text-xs leading-8 hover:opacity-70">
-            {convo.archived ? "↩️" : "🗄️"}
-          </button>
-        </form>
-
-        <form
-          action={deleteConversationAction}
-          onSubmit={(e) => {
-            const forget = e.currentTarget.elements.namedItem("forget") as HTMLInputElement;
-            const msg =
-              `Delete "${convo.title}" permanently?\n\n` +
-              `This cannot be undone. Archiving hides it instead and keeps everything.\n\n` +
-              `OK = delete the chat.\n` +
-              `Cancel = keep it.`;
-            if (!window.confirm(msg)) {
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          maxLength={120}
+          aria-label="Chat name"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
               e.preventDefault();
-              return;
+              save();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
             }
-            forget.value = window.confirm(
-              "Also forget what the assistant learned from this chat?\n\n" +
-                "OK = forget it too.\n" +
-                "Cancel = keep those memories.",
-            )
-              ? "true"
-              : "false";
           }}
+          onBlur={save}
+          className="min-w-0 flex-1 rounded-md border px-2 py-2 text-sm"
+          style={{ background: "var(--bg)", borderColor: "var(--accent)" }}
+        />
+      ) : (
+        <Link
+          href={`/chat/${convo.id}`}
+          onClick={onNavigate}
+          onDoubleClick={(e) => {
+            e.preventDefault();
+            startEditing();
+          }}
+          className="min-w-0 flex-1 truncate py-2.5 pl-2 pr-1 text-sm hover:opacity-80"
+          title={`${title} — double-click to rename`}
         >
-          <input type="hidden" name="id" value={convo.id} />
-          <input type="hidden" name="forget" value="false" />
-          <button type="submit" title="Delete" aria-label="Delete chat"
-                  className="h-8 w-7 text-xs leading-8 hover:opacity-70">
-            🗑️
-          </button>
-        </form>
-      </div>
+          {convo.pinned && <span aria-hidden> 📌 </span>}
+          {title}
+        </Link>
+      )}
+
+      {!editing && (
+        <>
+          {/* Pointer devices: a compact cluster that overlays the end of the
+              title only on hover or keyboard focus, so titles get full width. */}
+          <div className="row-actions-hover absolute inset-y-0 right-1 items-center rounded-md pl-4"
+               style={{
+                 background: `linear-gradient(to right, transparent, ${
+                   current ? "var(--bg)" : "var(--panel)"} 1rem)`,
+               }}>
+            <IconButton label="Rename chat" onClick={startEditing}>✏️</IconButton>
+            {!convo.archived && (
+              <form action={togglePinAction}>
+                <input type="hidden" name="id" value={convo.id} />
+                <IconButton label={convo.pinned ? "Unpin chat" : "Pin chat"} submit>
+                  {convo.pinned ? "📌" : "📍"}
+                </IconButton>
+              </form>
+            )}
+            <form action={toggleArchiveAction}>
+              <input type="hidden" name="id" value={convo.id} />
+              <IconButton label={convo.archived ? "Unarchive chat" : "Archive chat"} submit>
+                {convo.archived ? "↩️" : "🗄️"}
+              </IconButton>
+            </form>
+            <form action={deleteConversationAction} onSubmit={(e) => confirmDelete(e, title)}>
+              <input type="hidden" name="id" value={convo.id} />
+              <input type="hidden" name="forget" value="false" />
+              <IconButton label="Delete chat" submit>🗑️</IconButton>
+            </form>
+          </div>
+
+          {/* Touch devices: one ⋯ button opening a labelled menu, since emoji
+              on their own are hard to tell apart at thumb size. */}
+          <div className="row-actions-touch relative shrink-0">
+            <button
+              type="button"
+              aria-label="Chat options"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+              className="h-9 w-9 rounded-md text-base leading-none"
+              style={{ color: "var(--muted)" }}
+            >
+              ⋯
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} aria-hidden />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-10 z-40 w-44 overflow-hidden rounded-xl border py-1 text-sm shadow-lg"
+                  style={{ background: "var(--panel)", borderColor: "var(--border)" }}
+                >
+                  <MenuItem onClick={() => { setMenuOpen(false); startEditing(); }}>✏️  Rename</MenuItem>
+                  {!convo.archived && (
+                    <form action={togglePinAction}>
+                      <input type="hidden" name="id" value={convo.id} />
+                      <MenuItem submit>{convo.pinned ? "📌  Unpin" : "📍  Pin"}</MenuItem>
+                    </form>
+                  )}
+                  <form action={toggleArchiveAction}>
+                    <input type="hidden" name="id" value={convo.id} />
+                    <MenuItem submit>{convo.archived ? "↩️  Unarchive" : "🗄️  Archive"}</MenuItem>
+                  </form>
+                  <form action={deleteConversationAction} onSubmit={(e) => confirmDelete(e, title)}>
+                    <input type="hidden" name="id" value={convo.id} />
+                    <input type="hidden" name="forget" value="false" />
+                    <MenuItem submit danger>🗑️  Delete</MenuItem>
+                  </form>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+function confirmDelete(e: React.FormEvent<HTMLFormElement>, title: string) {
+  const forget = e.currentTarget.elements.namedItem("forget") as HTMLInputElement;
+  if (
+    !window.confirm(
+      `Delete "${title}" permanently?\n\n` +
+        "This cannot be undone. Archiving hides it instead and keeps everything.",
+    )
+  ) {
+    e.preventDefault();
+    return;
+  }
+  forget.value = window.confirm(
+    "Also forget what the assistant learned from this chat?\n\n" +
+      "OK = forget it too.\nCancel = keep those memories.",
+  )
+    ? "true"
+    : "false";
+}
+
+function IconButton({
+  label, children, onClick, submit,
+}: {
+  label: string;
+  children: React.ReactNode;
+  onClick?: () => void;
+  submit?: boolean;
+}) {
+  return (
+    <button
+      type={submit ? "submit" : "button"}
+      onClick={onClick}
+      title={label.replace(/ chat$/, "")}
+      aria-label={label}
+      className="h-8 w-7 text-xs leading-8 opacity-70 hover:opacity-100"
+    >
+      {children}
+    </button>
+  );
+}
+
+function MenuItem({
+  children, onClick, submit, danger,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  submit?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type={submit ? "submit" : "button"}
+      role="menuitem"
+      onClick={onClick}
+      className="block w-full px-3 py-2.5 text-left hover:opacity-70"
+      style={danger ? { color: "#dc2626" } : undefined}
+    >
+      {children}
+    </button>
   );
 }
