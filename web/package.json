@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.126.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.2",
+    "exceljs": "^4.4.0",
     "fast-xml-parser": "^5.11.1",
     "jose": "^6.2.12",
     "mammoth": "^1.12.3",

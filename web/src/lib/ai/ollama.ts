@@ -5,6 +5,14 @@ export const CHAT_MODEL = process.env.OLLAMA_CHAT_MODEL ?? "gemma3:latest";
 export const VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? "llava:latest";
 export const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL ?? "nomic-embed-text";
 
+/**
+ * Ollama defaults to a small context window regardless of what the model
+ * supports, and silently drops the FRONT of an over-long prompt — which is
+ * exactly where the system prompt and document excerpts live. Without this,
+ * the model answers from memory and looks like it is ignoring your files.
+ */
+const NUM_CTX = Number(process.env.OLLAMA_NUM_CTX ?? 16384);
+
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 export async function ollamaUp(): Promise<boolean> {
@@ -24,7 +32,12 @@ export async function* streamOllama(
   const res = await fetch(`${BASE}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, messages, stream: true }),
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      options: { num_ctx: NUM_CTX },
+    }),
   });
   if (!res.ok || !res.body) {
     throw new Error(`Ollama ${res.status}: ${await res.text().catch(() => "")}`);
@@ -103,6 +116,7 @@ export async function describeImage(base64: string, prompt: string): Promise<str
     body: JSON.stringify({
       model: VISION_MODEL,
       stream: false,
+      options: { num_ctx: NUM_CTX },
       messages: [{ role: "user", content: prompt, images: [base64] }],
     }),
   });

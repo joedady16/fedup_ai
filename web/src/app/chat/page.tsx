@@ -13,6 +13,7 @@ export default async function NewChatPage() {
 
   return (
     <ChatShell
+      key={"new"}
       user={{ name: user.name, role: user.role }}
       conversations={await listConversations(user.id)}
       initialMessages={[]}

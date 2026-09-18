@@ -6,12 +6,15 @@ import { conversations, messages as messagesTable } from "@/db/schema";
 import { getUser } from "@/lib/auth";
 import {
   checkPrompt, recordBlock, systemPromptFor, NO_IMAGE_CLAIM,
-  HAS_WEB_ACCESS, NO_WEB_ACCESS, NO_WEB_ACCESS_KID,
+  HAS_WEB_ACCESS, NO_WEB_ACCESS, NO_WEB_ACCESS_KID, CAN_READ_DOCS,
 } from "@/lib/safety";
 import {
   streamChat, resolveMode, smartModeAvailable, webAccessAvailable, type ChatMessage,
 } from "@/lib/ai/chat";
-import { retrieve, formatExcerpts } from "@/lib/rag";
+import {
+  retrieve, formatExcerpts, listDocuments, formatManifest,
+  isDocumentScoped, chunksForDocuments, documentOverview,
+} from "@/lib/rag";
 import { recallMemories, formatMemories, learnFromExchange } from "@/lib/memory";
 import { looksLikeImageRequest, extractImagePrompt } from "@/lib/image-intent";
 import { looksLikeDiagramRequest } from "@/lib/diagram";
@@ -181,22 +184,47 @@ export async function POST(req: Request) {
         }
 
         // Pull in what we know: documents first, then learned facts.
-        const [excerpts, memories] = await Promise.all([
+        const [similar, memories, docs] = await Promise.all([
           retrieve(user.id, message).catch(() => []),
           recallMemories(user.id, message).catch(() => []),
+          listDocuments(user.id).catch(() => []),
         ]);
+
+        // A question aimed at the documents themselves ("are there duplicates
+        // in each?") needs more than the few chunks nearest in vector space.
+        let excerpts = similar;
+        if (docs.length && isDocumentScoped(message)) {
+          const recent = docs.slice(0, 3).map((d) => d.id);
+
+          // Opus reads the documents whole. The local model gets a structural
+          // overview (one chunk per sheet, header included) plus its
+          // similarity hits — burying a 4B model in thousands of rows makes it
+          // answer from general knowledge instead of from the file.
+          const base =
+            mode === "smart"
+              ? await chunksForDocuments(recent, 120_000).catch(() => [])
+              : await documentOverview(recent, 8_000).catch(() => []);
+
+          if (base.length) {
+            const seen = new Set(base.map((w) => w.content));
+            const extra = similar.filter((e) => !seen.has(e.content));
+            excerpts = mode === "smart" ? [...base, ...extra] : [...base, ...extra.slice(0, 2)];
+          }
+        }
 
         const webEnabled = mode === "smart" && user.role !== "kid" && webAccessAvailable();
 
         const system = [
           systemPromptFor(user.role, user.name),
           formatMemories(memories),
+          formatManifest(docs),
           formatExcerpts(excerpts),
           webEnabled
             ? HAS_WEB_ACCESS
             : user.role === "kid"
               ? NO_WEB_ACCESS_KID
               : NO_WEB_ACCESS,
+          docs.length ? CAN_READ_DOCS : "",
           NO_IMAGE_CLAIM, // last: small models weight the prompt tail most
         ]
           .filter(Boolean)

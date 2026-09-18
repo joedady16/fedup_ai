@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   logoutAction, togglePinAction, toggleArchiveAction, deleteConversationAction,
@@ -38,6 +38,7 @@ export default function ChatShell({
   smartAvailable, imagesAvailable,
 }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const [messages, setMessages] = useState<UiMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,6 +54,21 @@ export default function ChatShell({
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  /**
+   * Starting a new chat cannot rely on navigation alone: after the first
+   * message the URL is still /chat, so a link to /chat goes nowhere and the
+   * previous conversation stays on screen. Clear the state ourselves.
+   */
+  function startNewChat() {
+    setMessages([]);
+    setConvId(null);
+    setInput("");
+    setError(null);
+    setSidebarOpen(false);
+    if (pathname !== "/chat") router.push("/chat");
+    else window.history.replaceState(null, "", "/chat");
+  }
 
   async function send() {
     const text = input.trim();
@@ -112,6 +128,11 @@ export default function ChatShell({
           if (ev.type === "meta" && ev.conversationId) {
             newId = ev.conversationId;
             setConvId(ev.conversationId);
+            // Shallow URL update: keeps the address bar honest (and the back
+            // button useful) without re-rendering and killing the stream.
+            if (!conversationId) {
+              window.history.replaceState(null, "", `/chat/${ev.conversationId}`);
+            }
           } else if (ev.type === "sources") {
             setMessages((m) => {
               const next = [...m];
@@ -176,32 +197,94 @@ export default function ChatShell({
     }
   }
 
-  async function upload(file: File) {
+  const MAX_FILES = 10;
+
+  /**
+   * Sends the whole batch in one request and follows the server's progress
+   * stream. One request means the server can write a single summary into the
+   * conversation, so uploads survive a page reload.
+   */
+  async function uploadMany(files: File[]) {
     setError(null);
     setBusy(true);
+
+    const batch = files.slice(0, MAX_FILES);
     setMessages((m) => [
       ...m,
-      { role: "assistant", content: `Reading "${file.name}"…`, pending: true },
+      {
+        role: "assistant",
+        content:
+          batch.length === 1
+            ? `Reading "${batch[0].name}"…`
+            : `Reading ${batch.length} files…`,
+        pending: true,
+      },
     ]);
 
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      for (const f of batch) fd.append("file", f);
+      if (convId) fd.append("conversationId", convId);
+
       const res = await fetch("/api/documents", { method: "POST", body: fd });
-      const j = await res.json();
+      if (!res.ok || !res.body) {
+        const j = await res.json().catch(() => ({ error: "Upload failed." }));
+        throw new Error(j.error ?? "Upload failed.");
+      }
 
-      setMessages((m) => m.slice(0, -1));
-      if (!res.ok) throw new Error(j.error ?? "Could not read that file.");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
 
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content:
-            `I've read "${file.name}" (${j.chunks} sections). ` +
-            `Ask me anything about it.`,
-        },
-      ]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          const raw = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!raw) continue;
+
+          const ev = JSON.parse(raw) as {
+            type: string;
+            index?: number;
+            total?: number;
+            name?: string;
+            summary?: string;
+            conversationId?: string | null;
+          };
+
+          if (ev.type === "progress") {
+            const label =
+              ev.total === 1
+                ? `Reading "${ev.name}"…`
+                : `Reading ${(ev.index ?? 0) + 1} of ${ev.total}: "${ev.name}"…`;
+            setMessages((m) => {
+              const next = [...m];
+              next[next.length - 1] = { role: "assistant", content: label, pending: true };
+              return next;
+            });
+          } else if (ev.type === "done") {
+            if (ev.conversationId && !convId) {
+              setConvId(ev.conversationId);
+              window.history.replaceState(null, "", `/chat/${ev.conversationId}`);
+            }
+            setMessages((m) => {
+              const next = [...m];
+              next[next.length - 1] = {
+                role: "assistant",
+                content: ev.summary || "Nothing was uploaded.",
+              };
+              return next;
+            });
+          }
+        }
+      }
+
+      // A brand-new chat now has a conversation row; refresh the sidebar.
+      router.refresh();
     } catch (e) {
       setMessages((m) => m.filter((x) => !x.pending));
       setError(e instanceof Error ? e.message : "Upload failed.");
@@ -276,13 +359,14 @@ export default function ChatShell({
       >
         <div className="flex items-center justify-between p-3 border-b" style={border}>
           <span className="font-semibold">Fedup AI</span>
-          <Link
-            href="/chat"
-            className="rounded-md px-2 py-1 text-xs font-medium text-white"
+          <button
+            type="button"
+            onClick={startNewChat}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-white"
             style={{ background: "var(--accent)" }}
           >
-            New
-          </Link>
+            New chat
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -448,16 +532,17 @@ export default function ChatShell({
                 ref={fileRef}
                 type="file"
                 className="hidden"
-                accept=".pdf,.docx,.txt,.md,.csv,.json,.log"
+                accept=".pdf,.docx,.xlsx,.xlsm,.xltx,.csv,.tsv,.txt,.md,.json,.log"
+                multiple
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void upload(f);
+                  const picked = Array.from(e.target.files ?? []);
+                  if (picked.length) void uploadMany(picked);
                 }}
               />
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={busy}
-                title="Upload a document"
+                title="Upload documents (you can pick several)"
                 className="h-11 w-11 shrink-0 rounded-xl border text-base disabled:opacity-50"
                 style={border}
               >

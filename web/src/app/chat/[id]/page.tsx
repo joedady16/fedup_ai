@@ -17,6 +17,7 @@ export default async function ChatPage({ params }: { params: Promise<{ id: strin
 
   return (
     <ChatShell
+      key={id}
       user={{ name: user.name, role: user.role }}
       conversations={await listConversations(user.id)}
       initialMessages={history}

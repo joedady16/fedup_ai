@@ -92,6 +92,19 @@ export const NO_WEB_ACCESS_KID =
   `Do not mention smart mode or any setting. Never invent page contents or ` +
   `pretend to have visited a site.`;
 
+/**
+ * Appended last when documents exist. gemma3 otherwise ignores the manifest
+ * and falls back to a canned "I'm a language model, I can't read files".
+ */
+export const CAN_READ_DOCS =
+  `IMPORTANT — the documents listed above have already been uploaded and indexed, ` +
+  `and their contents are provided to you in this prompt. You CAN read them.\n` +
+  `Never say you cannot access, see, open or retrieve files. Never say you are ` +
+  `"just a language model" that cannot read uploads. Never ask the person to ` +
+  `paste the contents — you already have them.\n` +
+  `If the excerpts you were given do not contain what is needed, name the file ` +
+  `and say which part you are missing.`;
+
 export const NO_IMAGE_CLAIM =
   `CRITICAL — you have no ability to draw, render, fetch or display images. ` +
   `You have no library of diagrams or photographs.\n` +
